@@ -11,11 +11,16 @@ from email.mime.multipart import MIMEMultipart
 # ============================================================================
 
 import os
+from dotenv import load_dotenv
+
+# Load variables from .env for local development
+load_dotenv()
 
 # Gmail Configuration
 GMAIL_ADDRESS = os.getenv("GMAIL_ADDRESS")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
 ALERT_RECIPIENT = os.getenv("ALERT_RECIPIENT", GMAIL_ADDRESS)
+ 
 
 # Indicator Configuration
 EMA_FAST = 9
