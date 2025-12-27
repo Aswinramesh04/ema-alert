@@ -10,15 +10,17 @@ from email.mime.multipart import MIMEMultipart
 # CONFIGURATION - UPDATE THESE VALUES
 # ============================================================================
 
-# Gmail Configuration
 import os
+
+# Gmail Configuration
 GMAIL_ADDRESS = os.getenv("GMAIL_ADDRESS")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
 ALERT_RECIPIENT = os.getenv("ALERT_RECIPIENT", GMAIL_ADDRESS)
+
 # Indicator Configuration
 EMA_FAST = 9
 EMA_SLOW = 15
-TIMEFRAME_MINUTES = 1  # Candle timeframe in minutes (e.g. 1, 5, 15)
+TIMEFRAME_MINUTES = int(os.getenv("TIMEFRAME_MINUTES", "1"))  # Candle timeframe in minutes
 
 # Market Data Configuration (Binance 1m candles)
 BINANCE_API_URL = "https://api.binance.com"
