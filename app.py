@@ -1,10 +1,9 @@
 import requests
 import smtplib
+import requests
 import time
 import json
 from datetime import datetime, timedelta
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 
 # ============================================================================
 # CONFIGURATION - UPDATE THESE VALUES
@@ -16,12 +15,9 @@ from dotenv import load_dotenv
 # Load variables from .env for local development
 load_dotenv()
 
-# Gmail Configuration
-GMAIL_ADDRESS = os.getenv("GMAIL_ADDRESS")
-GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
-ALERT_RECIPIENT = os.getenv("ALERT_RECIPIENT", GMAIL_ADDRESS)
- 
-
+# Telegram Configuration
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 # Indicator Configuration
 EMA_FAST = 9
 EMA_SLOW = 15
@@ -111,63 +107,36 @@ def fetch_btc_ohlc_data(symbol, interval="1m", limit=500):
     return ohlc
 
 def send_email_alert(subject, body, ema_fast, ema_slow, direction):
-    """
-    Send email alert for EMA crossover
-    """
-    try:
-        # Create email message
-        message = MIMEMultipart("alternative")
-        message["Subject"] = subject
-        message["From"] = GMAIL_ADDRESS
-        message["To"] = ALERT_RECIPIENT
-        
-        # Create HTML body with formatting
-        html_body = f"""
-        <html>
-            <body style="font-family: Arial, sans-serif; background-color: #f5f5f5; padding: 20px;">
-                <div style="background-color: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
-                    <h2 style="color: #1f2937; margin: 0 0 10px 0;">🚨 BTC EMA Crossover Alert</h2>
-                    <hr style="border: none; border-top: 2px solid #e5e7eb; margin: 15px 0;">
-                    
-                    <p style="color: #374151; font-size: 16px; margin: 10px 0;">
-                        <strong>Signal Type:</strong> {direction.upper()}
-                    </p>
-                    
-                    <p style="color: #374151; font-size: 16px; margin: 10px 0;">
-                        <strong>EMA(9):</strong> ${ema_fast:.2f}
-                    </p>
-                    
-                    <p style="color: #374151; font-size: 16px; margin: 10px 0;">
-                        <strong>EMA(15):</strong> ${ema_slow:.2f}
-                    </p>
-                    
-                    <p style="color: #6b7280; font-size: 14px; margin-top: 20px;">
-                        <strong>Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}
-                    </p>
-                    
-                    <p style="color: #6b7280; font-size: 12px; margin-top: 20px; text-align: center;">
-                        Timeframe: {TIMEFRAME_MINUTES}-minute | Pair: BTC/USDT
-                    </p>
-                </div>
-            </body>
-        </html>
-        """
-        
-        message.attach(MIMEText(html_body, "html"))
-        
-        # Send via Gmail SMTP
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
-            server.sendmail(GMAIL_ADDRESS, ALERT_RECIPIENT, message.as_string())
-        
-        print(f"✅ Alert email sent! | {direction.upper()} | EMA(9): ${ema_fast:.2f} | EMA(15): ${ema_slow:.2f}")
-        return True
-        
-    except smtplib.SMTPAuthenticationError:
-        print("❌ Email Error: Authentication failed. Check Gmail address and App Password.")
+    """Send Telegram alert for EMA crossover (replaces email)."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("❌ Telegram Error: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is not set.")
         return False
-    except Exception as e:
-        print(f"❌ Email Error: {e}")
+
+    try:
+        text = (
+            f"{subject}\n\n"
+            f"Signal: {direction.upper()}\n"
+            f"EMA(9): {ema_fast:.2f}\n"
+            f"EMA(15): {ema_slow:.2f}\n"
+            f"Timeframe: {TIMEFRAME_MINUTES}-minute\n"
+            f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": text,
+            "parse_mode": "Markdown",
+        }
+
+        response = requests.post(url, json=payload, timeout=10)
+        response.raise_for_status()
+
+        print(f"✅ Telegram alert sent! | {direction.upper()} | EMA(9): ${ema_fast:.2f} | EMA(15): ${ema_slow:.2f}")
+        return True
+
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Telegram Error: {e}")
         return False
 
 def check_ema_crossover(prices_list):
@@ -232,7 +201,7 @@ def main():
     print("=" * 70)
     print("🚀 BTC/USD EMA(9,15) Crossover Alert System Started")
     print("=" * 70)
-    print(f"📧 Email: {ALERT_RECIPIENT}")
+    # print(f"📧 Email: {ALERT_RECIPIENT}")
     print(f"📊 Timeframe: {TIMEFRAME_MINUTES} minutes")
     print(f"📈 Indicators: EMA({EMA_FAST}) and EMA({EMA_SLOW})")
     print("=" * 70)
