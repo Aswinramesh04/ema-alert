@@ -37,12 +37,9 @@ TWELVEDATA_INTERVAL = os.getenv("TWELVEDATA_INTERVAL", "1min")  # e.g. 1min, 5mi
 SYMBOLS = [
     # Crypto via Twelve Data
     {"provider": "twelvedata", "api_symbol": "BTC/USD", "label": "BTC/USD"},
-    {"provider": "twelvedata", "api_symbol": "SOL/USD", "label": "SOL/USD"},
-    {"provider": "twelvedata", "api_symbol": "ETH/USD", "label": "ETH/USD"},
 
     # FX via Twelve Data
     {"provider": "twelvedata", "api_symbol": "USD/JPY", "label": "USDJPY"},
-    {"provider": "twelvedata", "api_symbol": "GBP/USD", "label": "GBPUSD"},
     {"provider": "twelvedata", "api_symbol": "AUD/USD", "label": "AUDUSD"},
     {"provider": "twelvedata", "api_symbol": "EUR/USD", "label": "EURUSD"},
 
