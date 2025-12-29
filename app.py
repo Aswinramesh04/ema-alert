@@ -1,6 +1,5 @@
 import requests
 import smtplib
-import requests
 import time
 import json
 from datetime import datetime, timedelta
@@ -15,7 +14,9 @@ from dotenv import load_dotenv
 # Load variables from .env for local development
 load_dotenv()
 
-# Telegram Configuration
+#########################
+# Telegram Configuration #
+#########################
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 # Indicator Configuration
@@ -23,14 +24,31 @@ EMA_FAST = 9
 EMA_SLOW = 15
 TIMEFRAME_MINUTES = int(os.getenv("TIMEFRAME_MINUTES", "1"))  # Candle timeframe in minutes
 
-# Market Data Configuration (Binance 1m candles)
-BINANCE_API_URL = "https://api.binance.com"
+####################################
+# Market Data Configuration
+####################################
+
+# Twelve Data for FX / metals / commodities
+TWELVEDATA_API_URL = "https://api.twelvedata.com/time_series"
+TWELVEDATA_API_KEY = os.getenv("TWELVEDATA_API_KEY")
+TWELVEDATA_INTERVAL = os.getenv("TWELVEDATA_INTERVAL", "1min")  # e.g. 1min, 5min, 15min
+
+# Unified symbol list with provider
 SYMBOLS = [
-    {"api_symbol": "BTCUSDT", "label": "BTC/USD"},
-    {"api_symbol": "SOLUSDT", "label": "SOL/USD"},
-    {"api_symbol": "ETHUSDT", "label": "ETH/USD"}
-]  # Trading pairs used for EMA calculation
-BINANCE_INTERVAL = "1m"      # Candle interval; keep "1m" to match TIMEFRAME_MINUTES = 1
+    # Crypto via Twelve Data
+    {"provider": "twelvedata", "api_symbol": "BTC/USD", "label": "BTC/USD"},
+    {"provider": "twelvedata", "api_symbol": "SOL/USD", "label": "SOL/USD"},
+    {"provider": "twelvedata", "api_symbol": "ETH/USD", "label": "ETH/USD"},
+
+    # FX via Twelve Data
+    {"provider": "twelvedata", "api_symbol": "USD/JPY", "label": "USDJPY"},
+    {"provider": "twelvedata", "api_symbol": "GBP/USD", "label": "GBPUSD"},
+    {"provider": "twelvedata", "api_symbol": "AUD/USD", "label": "AUDUSD"},
+    {"provider": "twelvedata", "api_symbol": "EUR/USD", "label": "EURUSD"},
+
+    # Metals via Twelve Data
+    {"provider": "twelvedata", "api_symbol": "XAU/USD", "label": "XAU/USD"},
+]  # All pairs used for EMA calculation
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -53,55 +71,50 @@ def calculate_ema(prices, period):
     
     return ema
 
-def fetch_btc_ohlc_data(symbol, interval="1m", limit=500):
-    """Fetch OHLC data from Binance klines for a given symbol.
+
+def fetch_twelvedata_ohlc(symbol, interval="1min", limit=500):
+    """Fetch OHLC data from Twelve Data for a given symbol.
 
     Returns: list of [timestamp, open, high, low, close]
     """
-    # try:
-    #     endpoint = f"{BINANCE_API_URL}/api/v3/klines"
+    if not TWELVEDATA_API_KEY:
+        print("❌ Twelve Data Error: TWELVEDATA_API_KEY is not set.")
+        return None
 
-    #     params = {
-    #         "symbol": BINANCE_SYMBOL,
-    #         "interval": BINANCE_INTERVAL,
-    #         "limit": limit,  # number of candles to fetch
-    #     }
+    params = {
+        "symbol": symbol,
+        "interval": interval,
+        "outputsize": limit,
+        "apikey": TWELVEDATA_API_KEY,
+    }
 
-    #     response = requests.get(endpoint, params=params, timeout=10)
-    #     response.raise_for_status()
-
-    #     raw = response.json()
-
-    #     # Binance kline format:
-    #     # [
-    #     #   openTime, open, high, low, close, volume,
-    #     #   closeTime, quoteAssetVolume, numberOfTrades,
-    #     #   takerBuyBaseVolume, takerBuyQuoteVolume, ignore
-    #     # ]
-    #     ohlc = []
-    #     for k in raw:
-    #         timestamp = k[0]
-    #         open_price = float(k[1])
-    #         high = float(k[2])
-    #         low = float(k[3])
-    #         close = float(k[4])
-    #         ohlc.append([timestamp, open_price, high, low, close])
-
-    #     return ohlc
-
-
-    endpoint = f"{BINANCE_API_URL}/api/v3/klines"
-    params = {"symbol": symbol, "interval": interval, "limit": limit}
-    resp = requests.get(endpoint, params=params, timeout=10)
+    resp = requests.get(TWELVEDATA_API_URL, params=params, timeout=10)
     resp.raise_for_status()
-    raw = resp.json()
+    data = resp.json()
+
+    if "values" not in data:
+        print(f"❌ Twelve Data Error for {symbol}: {data}")
+        return None
+
+    values = data["values"]
+
+    # Twelve Data returns newest first; reverse to oldest → newest
+    values = list(reversed(values))
+
     ohlc = []
-    for k in raw:
-        timestamp = k[0]
-        open_price = float(k[1])
-        high = float(k[2])
-        low = float(k[3])
-        close = float(k[4])
+    for v in values:
+        # datetime like '2024-01-01 12:34:00'
+        ts_str = v.get("datetime")
+        try:
+            dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+            timestamp = int(dt.timestamp() * 1000)
+        except Exception:
+            timestamp = ts_str
+
+        open_price = float(v["open"])
+        high = float(v["high"])
+        low = float(v["low"])
+        close = float(v["close"])
         ohlc.append([timestamp, open_price, high, low, close])
 
     return ohlc
@@ -216,28 +229,36 @@ def main():
         for cfg in SYMBOLS:
             api_symbol = cfg["api_symbol"]
             label = cfg["label"]
+            provider = cfg.get("provider", "binance")
 
-            print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Fetching data for {label} ({api_symbol})...")
+            print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Fetching data for {label} ({api_symbol}) from {provider}...")
 
-            ohlc = fetch_btc_ohlc_data(api_symbol, BINANCE_INTERVAL)
-            if not ohlc:
+            if provider == "twelvedata":
+                ohlc_data = fetch_twelvedata_ohlc(api_symbol, TWELVEDATA_INTERVAL)
+            else:
+                print(f"Unknown provider '{provider}' for {label}. Skipping.")
                 continue
 
-            close_prices = [c[4] for c in ohlc]
-            crossover, ema_9, ema_15 = check_ema_crossover(close_prices)
+            if not ohlc_data or len(ohlc_data) < EMA_SLOW + 5:
+                print(f"Not enough data received for {label}. Skipping this symbol.")
+                continue
 
-            if crossover and ema_9 is not None and ema_15 is not None:
+            closes = [candle[4] for candle in ohlc_data]
+
+            crossover, ema_fast, ema_slow = check_ema_crossover(closes)
+
+            if crossover and ema_fast is not None and ema_slow is not None:
                 last_ts = last_alert_timestamp.get(api_symbol)
                 if last_ts is None or (now - last_ts).total_seconds() > sleep_seconds:
                     subject = f"🚨 {label} EMA Crossover Alert - {crossover.upper()}"
                     body = f"{label} EMA(9) has crossed {'above' if crossover == 'bullish' else 'below'} EMA(15)"
-                    send_email_alert(subject, body, ema_9, ema_15, crossover)
+                    send_email_alert(subject, body, ema_fast, ema_slow, crossover)
                     last_alert_timestamp[api_symbol] = now
 
             # Optional: print per‑symbol status
-            ema_9_str = f"{ema_9:.2f}" if ema_9 is not None else "N/A"
-            ema_15_str = f"{ema_15:.2f}" if ema_15 is not None else "N/A"
-            print(f"{label} | EMA(9): ${ema_9_str} | EMA(15): ${ema_15_str}")
+            ema_fast_str = f"{ema_fast:.2f}" if ema_fast is not None else "N/A"
+            ema_slow_str = f"{ema_slow:.2f}" if ema_slow is not None else "N/A"
+            print(f"{label} | EMA(9): ${ema_fast_str} | EMA(15): ${ema_slow_str}")
 
         print(f"Waiting {TIMEFRAME_MINUTES} minutes before next multi‑symbol scan...")
         time.sleep(sleep_seconds)
