@@ -22,7 +22,8 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 # Indicator Configuration
 EMA_FAST = 9
 EMA_SLOW = 15
-TIMEFRAME_MINUTES = int(os.getenv("TIMEFRAME_MINUTES", "1"))  # Candle timeframe in minutes
+TIMEFRAME_MINUTES = int(os.getenv("TIMEFRAME_MINUTES", "1"))  # Iteration/sleep interval in minutes
+SIGNAL_TIMEFRAME_MINUTES = int(os.getenv("SIGNAL_TIMEFRAME_MINUTES", "15"))  # Candle timeframe used for signal calculation (e.g., 15)
 
 ####################################
 # Market Data Configuration
@@ -30,21 +31,33 @@ TIMEFRAME_MINUTES = int(os.getenv("TIMEFRAME_MINUTES", "1"))  # Candle timeframe
 
 # Twelve Data for FX / metals / commodities
 TWELVEDATA_API_URL = "https://api.twelvedata.com/time_series"
-TWELVEDATA_API_KEY = os.getenv("TWELVEDATA_API_KEY")
+
+# Support multiple Twelve Data API keys (defaults provided here; env vars can override)
+TWELVEDATA_API_KEYS = [
+    os.getenv("TWELVEDATA_API_KEY_1"),
+    os.getenv("TWELVEDATA_API_KEY_2"),
+    os.getenv("TWELVEDATA_API_KEY_3"),
+]
+
+# Backwards-compatible single-key variable (defaults to first key)
+TWELVEDATA_API_KEY = os.getenv("TWELVEDATA_API_KEY", TWELVEDATA_API_KEYS[0])
+
 TWELVEDATA_INTERVAL = os.getenv("TWELVEDATA_INTERVAL", "1min")  # e.g. 1min, 5min, 15min
 
 # Unified symbol list with provider
+# Assign two symbols per Twelve Data API key by default using api_key_idx (0, 1, 2)
 SYMBOLS = [
-    # Crypto via Twelve Data
-    {"provider": "twelvedata", "api_symbol": "BTC/USD", "label": "BTC/USD"},
+    # Crypto via Twelve Data - API key index 0
+    {"provider": "twelvedata", "api_symbol": "BTC/USD", "label": "BTC/USD", "api_key_idx": 0},
 
-    # FX via Twelve Data
-    {"provider": "twelvedata", "api_symbol": "USD/JPY", "label": "USDJPY"},
-    {"provider": "twelvedata", "api_symbol": "AUD/USD", "label": "AUDUSD"},
-    {"provider": "twelvedata", "api_symbol": "EUR/USD", "label": "EURUSD"},
+    # FX via Twelve Data - API key index 0 and 1
+    {"provider": "twelvedata", "api_symbol": "USD/JPY", "label": "USDJPY", "api_key_idx": 0},
+    {"provider": "twelvedata", "api_symbol": "AUD/USD", "label": "AUDUSD", "api_key_idx": 1},
+    {"provider": "twelvedata", "api_symbol": "EUR/USD", "label": "EURUSD", "api_key_idx": 1},
+    {"provider": "twelvedata", "api_symbol": "NZD/USD", "label": "NZDUSD", "api_key_idx": 2},
 
-    # Metals via Twelve Data
-    {"provider": "twelvedata", "api_symbol": "XAU/USD", "label": "XAU/USD"},
+    # Metals via Twelve Data - API key index 2
+    {"provider": "twelvedata", "api_symbol": "XAU/USD", "label": "XAU/USD", "api_key_idx": 2},
 ]  # All pairs used for EMA calculation
 
 # ============================================================================
@@ -69,20 +82,22 @@ def calculate_ema(prices, period):
     return ema
 
 
-def fetch_twelvedata_ohlc(symbol, interval="1min", limit=500):
+def fetch_twelvedata_ohlc(symbol, interval="15min", limit=500, api_key=None):
     """Fetch OHLC data from Twelve Data for a given symbol.
 
     Returns: list of [timestamp, open, high, low, close]
     """
-    if not TWELVEDATA_API_KEY:
-        print("❌ Twelve Data Error: TWELVEDATA_API_KEY is not set.")
+    # Determine which API key to use: explicit param -> single-key env -> first key from list
+    key = api_key or TWELVEDATA_API_KEY or (TWELVEDATA_API_KEYS[0] if TWELVEDATA_API_KEYS else None)
+    if not key:
+        print("❌ Twelve Data Error: No API key available for Twelve Data.")
         return None
 
     params = {
         "symbol": symbol,
         "interval": interval,
         "outputsize": limit,
-        "apikey": TWELVEDATA_API_KEY,
+        "apikey": key,
     }
 
     resp = requests.get(TWELVEDATA_API_URL, params=params, timeout=10)
@@ -128,7 +143,7 @@ def send_email_alert(subject, body, ema_fast, ema_slow, direction):
             f"Signal: {direction.upper()}\n"
             f"EMA(9): {ema_fast:.2f}\n"
             f"EMA(15): {ema_slow:.2f}\n"
-            f"Timeframe: {TIMEFRAME_MINUTES}-minute\n"
+            f"Timeframe: {SIGNAL_TIMEFRAME_MINUTES}-minute\n"
             f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
@@ -212,7 +227,7 @@ def main():
     print("🚀 BTC/USD EMA(9,15) Crossover Alert System Started")
     print("=" * 70)
     # print(f"📧 Email: {ALERT_RECIPIENT}")
-    print(f"📊 Timeframe: {TIMEFRAME_MINUTES} minutes")
+    print(f"⏱️ Scan interval: {TIMEFRAME_MINUTES} minutes | Signal timeframe: {SIGNAL_TIMEFRAME_MINUTES} minutes")
     print(f"📈 Indicators: EMA({EMA_FAST}) and EMA({EMA_SLOW})")
     print("=" * 70)
     print()
@@ -228,10 +243,16 @@ def main():
             label = cfg["label"]
             provider = cfg.get("provider", "binance")
 
-            print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Fetching data for {label} ({api_symbol}) from {provider}...")
+            print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Fetching {SIGNAL_TIMEFRAME_MINUTES}m data for {label} ({api_symbol}) from {provider}...")
 
             if provider == "twelvedata":
-                ohlc_data = fetch_twelvedata_ohlc(api_symbol, TWELVEDATA_INTERVAL)
+                # pick api key for this symbol (if set)
+                api_key_idx = cfg.get("api_key_idx")
+                api_key = None
+                if api_key_idx is not None and 0 <= api_key_idx < len(TWELVEDATA_API_KEYS):
+                    api_key = TWELVEDATA_API_KEYS[api_key_idx]
+                signal_interval = f"{SIGNAL_TIMEFRAME_MINUTES}min"
+                ohlc_data = fetch_twelvedata_ohlc(api_symbol, signal_interval, api_key=api_key)
             else:
                 print(f"Unknown provider '{provider}' for {label}. Skipping.")
                 continue
